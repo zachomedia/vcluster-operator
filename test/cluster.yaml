@@ -1,0 +1,31 @@
+apiVersion: vcluster.zacharyseguin.ca/v1alpha1
+kind: Cluster
+metadata:
+  name: k8s-1-18
+  namespace: vc-test
+spec:
+  image: rancher/k3s:v1.18.19-k3s1
+---
+apiVersion: vcluster.zacharyseguin.ca/v1alpha1
+kind: Cluster
+metadata:
+  name: k8s-1-19
+  namespace: vc-test
+spec:
+  image: rancher/k3s:v1.19.11-k3s1
+---
+apiVersion: vcluster.zacharyseguin.ca/v1alpha1
+kind: Cluster
+metadata:
+  name: k8s-1-20
+  namespace: vc-test
+spec:
+  image: rancher/k3s:v1.20.7-k3s1
+---
+apiVersion: vcluster.zacharyseguin.ca/v1alpha1
+kind: Cluster
+metadata:
+  name: k8s-1-21
+  namespace: vc-test
+spec:
+  image: rancher/k3s:v1.21.1-k3s1
