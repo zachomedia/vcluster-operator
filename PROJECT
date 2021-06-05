@@ -13,7 +13,7 @@ resources:
   controller: true
   domain: zacharyseguin.ca
   group: vcluster
-  kind: Cluster
+  kind: VirtualCluster
   path: github.com/zachomedia/vcluster-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

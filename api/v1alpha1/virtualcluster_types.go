@@ -25,39 +25,40 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ClusterSpec defines the desired state of Cluster
-type ClusterSpec struct {
+// VirtualClusterSpec defines the desired state of VirtualCluster
+type VirtualClusterSpec struct {
 	// Image sets the image of the control plane of the virtual cluster
 	Image string `json:"image,omitempty"`
 }
 
-// ClusterStatus defines the observed state of Cluster
-type ClusterStatus struct {
+// VirtualClusterStatus defines the observed state of VirtualCluster
+type VirtualClusterStatus struct {
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Image",type="string",JSONPath=".spec.image",description="The image of the control plane"
-// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of this resource"
+//+kubebuilder:resource:path=virtualclusters,shortName=vc
+//+kubebuilder:printcolumn:name="Image",type="string",JSONPath=".spec.image",description="The image of the control plane"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of this resource"
 
-// Cluster is the Schema for the clusters API
-type Cluster struct {
+// VirtualCluster is the Schema for the virtualclusters API
+type VirtualCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ClusterSpec   `json:"spec,omitempty"`
-	Status ClusterStatus `json:"status,omitempty"`
+	Spec   VirtualClusterSpec   `json:"spec,omitempty"`
+	Status VirtualClusterStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// ClusterList contains a list of Cluster
-type ClusterList struct {
+// VirtualClusterList contains a list of VirtualCluster
+type VirtualClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Cluster `json:"items"`
+	Items           []VirtualCluster `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Cluster{}, &ClusterList{})
+	SchemeBuilder.Register(&VirtualCluster{}, &VirtualClusterList{})
 }

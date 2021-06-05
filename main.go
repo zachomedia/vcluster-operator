@@ -83,11 +83,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.ClusterReconciler{
+	if err = (&controllers.VirtualClusterReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Cluster")
+		setupLog.Error(err, "unable to create controller", "controller", "VirtualCluster")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

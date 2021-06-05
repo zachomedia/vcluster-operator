@@ -1,13 +1,13 @@
-# permissions for end users to edit clusters.
+# permissions for end users to edit virtualclusters.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: cluster-editor-role
+  name: virtualcluster-editor-role
 rules:
 - apiGroups:
   - vcluster.zacharyseguin.ca
   resources:
-  - clusters
+  - virtualclusters
   verbs:
   - create
   - delete
@@ -19,6 +19,6 @@ rules:
 - apiGroups:
   - vcluster.zacharyseguin.ca
   resources:
-  - clusters/status
+  - virtualclusters/status
   verbs:
   - get

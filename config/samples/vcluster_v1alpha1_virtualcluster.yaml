@@ -1,0 +1,6 @@
+apiVersion: vcluster.zacharyseguin.ca/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: virtualcluster-sample
+spec:
+  image: rancher/k3s:v1.21.1-k3s1
