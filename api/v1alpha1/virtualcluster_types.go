@@ -22,31 +22,89 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 package v1alpha1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // VirtualClusterSpec defines the desired state of VirtualCluster
 type VirtualClusterSpec struct {
-	// Images sets the images of the control plane of the virtual cluster
-	Images VirtualClusterImages `json:"images,omitempty"`
+	// Defines the control plane specification
+	// +kubebuilder:default={image:{repository:"rancher/k3s", tag:"latest"}}
+	ControlPlane VirtualClusterComponentSpec `json:"controlPlane,omitempty"`
+
+	// Defines the syncer specification
+	// +kubebuilder:default={image:{repository:"loftsh/vcluster", tag:"latest"}}
+	Syncer VirtualClusterComponentSpec `json:"syncer,omitempty"`
+
+	// Define how nodes are synced into the virtual cluster
+	//
+	// Note: If using a strategy other than "VirtualClusterNodeSyncStrategyLabelSelector",
+	// then a ClusterRole will be created.
+	// +kubebuilder:default={strategy:"Fake"}
+	NodeSync VirtualClusterNodeSyncSpec `json:"nodeSync,omitempty"`
 
 	// Specify the ingress template for the cluster
-	Ingress *VirtualClusterIngress `json:"ingress,omitempty"`
+	// +optional
+	Ingress *VirtualClusterIngressSpec `json:"ingress,omitempty"`
 }
 
-// VirtualClusterImages defines the images used by a virtual cluster
-type VirtualClusterImages struct {
-	// Cluster is the cluster control plane image (usually rancher/k3s)
-	Cluster string `json:"cluster,omitempty"`
+// VirtualClusterNodeSyncSpec defines how nodes are synced into the virtual cluster
+type VirtualClusterNodeSyncSpec struct {
+	// Node sync strategy
+	//
+	// Note: If set to VirtualClusterNodeSyncStrategyRealLabelSelector,
+	// then the SelectorLabels must be provided
+	// +kubebuilder:validation:Enum=Fake;Real;RealAll;RealLabelSelector
+	Strategy VirtualClusterNodeSyncStrategy `json:"strategy"`
 
-	// Syncer is the virtual cluster data syncer (usually loftsh/vcluster)
-	Syncer string `json:"syncer,omitempty"`
+	// SelectorLabels when strategy is set to VirtualClusterNodeSyncStrategyLabelSelector
+	// +optional
+	SelectorLabels map[string]string `json:"selectorLabels,omitempty"`
+
+	// When using VirtualClusterNodeSyncStrategyRealLabelSelector, enforce the node
+	// selector for scheduling of pods
+	// +optional
+	EnforceNodeSelector bool `json:"enforceNodeSelector,omitempty"`
 }
 
-type VirtualClusterIngress struct {
+type VirtualClusterNodeSyncStrategy string
+
+const (
+	VirtualClusterNodeSyncStrategyFake              VirtualClusterNodeSyncStrategy = "Fake"
+	VirtualClusterNodeSyncStrategyReal              VirtualClusterNodeSyncStrategy = "Real"
+	VirtualClusterNodeSyncStrategyRealAll           VirtualClusterNodeSyncStrategy = "RealAll"
+	VirtualClusterNodeSyncStrategyRealLabelSelector VirtualClusterNodeSyncStrategy = "RealLabelSelector"
+)
+
+// VirtualClusterComponentSpec defines the desired state of a component of the Virtual Cluster
+type VirtualClusterComponentSpec struct {
+	// The image of the virtual cluster container
+	Image VirtualClusterImageSpec `json:"image,omitempty"`
+
+	// Extra arguments provided to the virtual cluster
+	// +optional
+	ExtraArgs []string `json:"extraArgs,omitempty"`
+}
+
+// VirtualClusterIngressSpec defines the ingress specification for the virtual cluster
+type VirtualClusterIngressSpec struct {
 	IngressClassName *string `json:"ingressClassName,omitempty"`
 	Hostname         string  `json:"hostname"`
 	TLSSecretName    *string `json:"tlsSecretName,omitempty"`
+}
+
+type VirtualClusterImageSpec struct {
+	// The image repository
+	Repository string `json:"repository,omitempty"`
+
+	// The image tag
+	Tag string `json:"tag,omitempty"`
+}
+
+// String returns the image spec as an image string
+func (img VirtualClusterImageSpec) String() string {
+	return fmt.Sprintf("%s:%s", img.Repository, img.Tag)
 }
 
 // VirtualClusterStatus defines the observed state of VirtualCluster
@@ -56,8 +114,8 @@ type VirtualClusterStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:path=virtualclusters,shortName=vc;vcluster
-//+kubebuilder:printcolumn:name="Cluster Image",type="string",JSONPath=".spec.images.cluster",description="The image of the control plane"
-//+kubebuilder:printcolumn:name="Syncer Image",type="string",JSONPath=".spec.images.syncer",description="The image of the syncer"
+//+kubebuilder:printcolumn:name="Cluster Image",type="string",JSONPath=".spec.cluster.image.tag",description="The image of the control plane"
+//+kubebuilder:printcolumn:name="Syncer Image",type="string",JSONPath=".spec.syncer.image.tag",description="The image of the syncer"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of this resource"
 
 // VirtualCluster is the Schema for the virtualclusters API
@@ -65,7 +123,7 @@ type VirtualCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   VirtualClusterSpec   `json:"spec,omitempty"`
+	Spec   VirtualClusterSpec   `json:"spec"`
 	Status VirtualClusterStatus `json:"status,omitempty"`
 }
 

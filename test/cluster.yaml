@@ -1,45 +1,29 @@
 apiVersion: vcluster.zacharyseguin.ca/v1alpha1
 kind: VirtualCluster
 metadata:
-  name: k8s-1-18
-  namespace: vc-test
-spec:
-  images:
-    cluster: rancher/k3s:v1.18.19-k3s1
+  name: base
+spec: {}
 ---
 apiVersion: vcluster.zacharyseguin.ca/v1alpha1
 kind: VirtualCluster
 metadata:
-  name: k8s-1-19
-  namespace: vc-test
+  name: real-nodes
 spec:
-  images:
-    cluster: rancher/k3s:v1.19.11-k3s1
----
-apiVersion: vcluster.zacharyseguin.ca/v1alpha1
-kind: VirtualCluster
-metadata:
-  name: k8s-1-20
-  namespace: vc-test
-spec:
-  images:
-    cluster: rancher/k3s:v1.20.7-k3s1
----
-apiVersion: vcluster.zacharyseguin.ca/v1alpha1
-kind: VirtualCluster
-metadata:
-  name: k8s-1-21
-  namespace: vc-test
-spec:
-  images:
-    cluster: rancher/k3s:v1.21.1-k3s1
+  nodeSync:
+    strategy: Real
 ---
 apiVersion: vcluster.zacharyseguin.ca/v1alpha1
 kind: VirtualCluster
 metadata:
   name: beta
-  namespace: vc-test
 spec:
-  images:
-    cluster: rancher/k3s:v1.21.1-k3s1
-    syncer: loftsh/vcluster:0.3.0-beta.0
+  controlPlane:
+    image:
+      repository: rancher/k3s
+      tag: v1.21.1-k3s1
+  syncer:
+    image:
+      repository: loftsh/vcluster
+      tag: 0.3.0-beta.0
+    extraArgs:
+      - --tls-san=beta-d00dc6.vcluster.onzs.ca

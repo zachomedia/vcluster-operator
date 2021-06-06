@@ -25,6 +25,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -140,36 +141,58 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// ******** CLUSTER ROLE ********
-	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRole{}, r.clusterRoleForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
-		actual := obj.(*rbacv1.ClusterRole)
-		expected := r.clusterRoleForVirtualCluster(cluster).(*rbacv1.ClusterRole)
+	if cluster.Spec.NodeSync.Strategy != vclusterv1alpha1.VirtualClusterNodeSyncStrategyFake {
+		res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRole{}, r.clusterRoleForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+			actual := obj.(*rbacv1.ClusterRole)
+			expected := r.clusterRoleForVirtualCluster(cluster).(*rbacv1.ClusterRole)
 
-		if !reflect.DeepEqual(actual.Rules, expected.Rules) {
-			actual.Rules = expected.Rules
-			return true
+			if !reflect.DeepEqual(actual.Rules, expected.Rules) {
+				actual.Rules = expected.Rules
+				return true
+			}
+
+			return false
+		}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+		if res != nil || err != nil {
+			return *res, err
 		}
-
-		return false
-	}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
-	if res != nil || err != nil {
-		return *res, err
+	} else {
+		obj := &rbacv1.ClusterRole{}
+		if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster))}, obj); err == nil {
+			log.Info("removing cluster role for cluster", "cluster", req.NamespacedName)
+			err = r.Delete(ctx, obj)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	// ******** CLUSTER ROLE BINDING ********
-	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRoleBinding{}, r.clusterRoleBindingForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
-		actual := obj.(*rbacv1.ClusterRoleBinding)
-		expected := r.clusterRoleBindingForVirtualCluster(cluster).(*rbacv1.ClusterRoleBinding)
+	if cluster.Spec.NodeSync.Strategy != vclusterv1alpha1.VirtualClusterNodeSyncStrategyFake {
+		res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRoleBinding{}, r.clusterRoleBindingForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+			actual := obj.(*rbacv1.ClusterRoleBinding)
+			expected := r.clusterRoleBindingForVirtualCluster(cluster).(*rbacv1.ClusterRoleBinding)
 
-		if !reflect.DeepEqual(actual.RoleRef, expected.RoleRef) || !reflect.DeepEqual(actual.Subjects, expected.Subjects) {
-			actual.RoleRef = expected.RoleRef
-			actual.Subjects = expected.Subjects
-			return true
+			if !reflect.DeepEqual(actual.RoleRef, expected.RoleRef) || !reflect.DeepEqual(actual.Subjects, expected.Subjects) {
+				actual.RoleRef = expected.RoleRef
+				actual.Subjects = expected.Subjects
+				return true
+			}
+
+			return false
+		}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+		if res != nil || err != nil {
+			return *res, err
 		}
-
-		return false
-	}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
-	if res != nil || err != nil {
-		return *res, err
+	} else {
+		obj := &rbacv1.ClusterRoleBinding{}
+		if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster))}, obj); err == nil {
+			log.Info("removing cluster role binding for cluster", "cluster", req.NamespacedName)
+			err = r.Delete(ctx, obj)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	// ******** SERVICE ********
@@ -180,6 +203,8 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// Sync up ClusterIP field
 		expected.Spec.ClusterIP = actual.Spec.ClusterIP
 		expected.Spec.ClusterIPs = actual.Spec.ClusterIPs
+		expected.Spec.IPFamilies = actual.Spec.IPFamilies
+		expected.Spec.IPFamilyPolicy = actual.Spec.IPFamilyPolicy
 
 		if !reflect.DeepEqual(actual.Spec, expected.Spec) {
 			actual.Spec = expected.Spec
@@ -199,6 +224,8 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// Sync up ClusterIP field
 		expected.Spec.ClusterIP = actual.Spec.ClusterIP
 		expected.Spec.ClusterIPs = actual.Spec.ClusterIPs
+		expected.Spec.IPFamilies = actual.Spec.IPFamilies
+		expected.Spec.IPFamilyPolicy = actual.Spec.IPFamilyPolicy
 
 		if !reflect.DeepEqual(actual.Spec, expected.Spec) {
 			actual.Spec = expected.Spec
@@ -490,22 +517,6 @@ func toInt64Ptr(val int64) *int64 {
 	return &val
 }
 
-func clusterImage(cluster *vclusterv1alpha1.VirtualCluster) string {
-	if cluster.Spec.Images.Cluster != "" {
-		return cluster.Spec.Images.Cluster
-	}
-
-	return DefaultVirtualClusterImage
-}
-
-func syncerImage(cluster *vclusterv1alpha1.VirtualCluster) string {
-	if cluster.Spec.Images.Syncer != "" {
-		return cluster.Spec.Images.Syncer
-	}
-
-	return DefaultSyncerImage
-}
-
 func labelsForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) map[string]string {
 	labels := cluster.DeepCopy().Labels
 	if labels == nil {
@@ -785,6 +796,27 @@ func (r *VirtualClusterReconciler) ingressForCluster(cluster *vclusterv1alpha1.V
 func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	volumeModeFilesystem := corev1.PersistentVolumeFilesystem
 
+	// Set node sync args
+	nodeSyncArgs := []string{}
+	switch cluster.Spec.NodeSync.Strategy {
+	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyFake:
+		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes")
+	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyReal:
+		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes=false")
+	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyRealAll:
+		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes=false", "--sync-all-nodes")
+	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyRealLabelSelector:
+		labels := []string{}
+		for k, v := range cluster.Spec.NodeSync.SelectorLabels {
+			labels = append(labels, fmt.Sprintf("%s=%s", k, v))
+		}
+		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes=false", fmt.Sprintf("--node-selector=%s", strings.Join(labels, ",")))
+
+		if cluster.Spec.NodeSync.EnforceNodeSelector {
+			nodeSyncArgs = append(nodeSyncArgs, "--enforce-node-selector")
+		}
+	}
+
 	statefulSet := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        objectName(cluster),
@@ -808,9 +840,9 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 					Containers: []corev1.Container{
 						{
 							Name:    ContainerNameVirtualCluster,
-							Image:   clusterImage(cluster),
+							Image:   cluster.Spec.ControlPlane.Image.String(),
 							Command: []string{"/bin/k3s"},
-							Args: []string{
+							Args: append([]string{
 								"server",
 								"--write-kubeconfig=/k3-config/kube-config.yaml",
 								"--data-dir=/data",
@@ -822,7 +854,7 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 								"--flannel-backend=none",
 								"--kube-controller-manager-arg=controllers=*,-nodeipam,-nodelifecycle,-persistentvolume-binder,-attachdetach,-persistentvolume-expander,-cloud-node-lifecycle",
 								fmt.Sprintf("--service-cidr=%s", serviceCidr),
-							},
+							}, cluster.Spec.ControlPlane.ExtraArgs...),
 							Ports: []v1.ContainerPort{
 								{
 									Name:          "https",
@@ -839,13 +871,13 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 						},
 						{
 							Name:  ContainerNameSyncer,
-							Image: syncerImage(cluster),
-							Args: []string{
+							Image: cluster.Spec.Syncer.Image.String(),
+							Args: append([]string{
 								fmt.Sprintf("--service-name=%s", objectName(cluster)),
 								fmt.Sprintf("--suffix=%s", objectName(cluster)),
 								fmt.Sprintf("--owning-statefulset=%s", objectName(cluster)),
 								fmt.Sprintf("--out-kube-config-secret=%s", objectName(cluster)),
-							},
+							}, append(nodeSyncArgs, cluster.Spec.Syncer.ExtraArgs...)...),
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "data",

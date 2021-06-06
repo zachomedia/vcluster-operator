@@ -21,11 +21,11 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: The image of the control plane
-      jsonPath: .spec.images.cluster
+      jsonPath: .spec.cluster.image.tag
       name: Cluster Image
       type: string
     - description: The image of the syncer
-      jsonPath: .spec.images.syncer
+      jsonPath: .spec.syncer.image.tag
       name: Syncer Image
       type: string
     - description: The age of this resource
@@ -52,18 +52,28 @@ spec:
           spec:
             description: VirtualClusterSpec defines the desired state of VirtualCluster
             properties:
-              images:
-                description: Images sets the images of the control plane of the virtual
-                  cluster
+              controlPlane:
+                default:
+                  image:
+                    repository: rancher/k3s
+                    tag: latest
+                description: Defines the control plane specification
                 properties:
-                  cluster:
-                    description: Cluster is the cluster control plane image (usually
-                      rancher/k3s)
-                    type: string
-                  syncer:
-                    description: Syncer is the virtual cluster data syncer (usually
-                      loftsh/vcluster)
-                    type: string
+                  extraArgs:
+                    description: Extra arguments provided to the virtual cluster
+                    items:
+                      type: string
+                    type: array
+                  image:
+                    description: The image of the virtual cluster container
+                    properties:
+                      repository:
+                        description: The image repository
+                        type: string
+                      tag:
+                        description: The image tag
+                        type: string
+                    type: object
                 type: object
               ingress:
                 description: Specify the ingress template for the cluster
@@ -77,10 +87,63 @@ spec:
                 required:
                 - hostname
                 type: object
+              nodeSync:
+                default:
+                  strategy: Fake
+                description: "Define how nodes are synced into the virtual cluster
+                  \n Note: If using a strategy other than \"VirtualClusterNodeSyncStrategyLabelSelector\",
+                  then a ClusterRole will be created."
+                properties:
+                  enforceNodeSelector:
+                    description: When using VirtualClusterNodeSyncStrategyRealLabelSelector,
+                      enforce the node selector for scheduling of pods
+                    type: boolean
+                  selectorLabels:
+                    additionalProperties:
+                      type: string
+                    description: SelectorLabels when strategy is set to VirtualClusterNodeSyncStrategyLabelSelector
+                    type: object
+                  strategy:
+                    description: "Node sync strategy \n Note: If set to VirtualClusterNodeSyncStrategyRealLabelSelector,
+                      then the SelectorLabels must be provided"
+                    enum:
+                    - Fake
+                    - Real
+                    - RealAll
+                    - RealLabelSelector
+                    type: string
+                required:
+                - strategy
+                type: object
+              syncer:
+                default:
+                  image:
+                    repository: loftsh/vcluster
+                    tag: latest
+                description: Defines the syncer specification
+                properties:
+                  extraArgs:
+                    description: Extra arguments provided to the virtual cluster
+                    items:
+                      type: string
+                    type: array
+                  image:
+                    description: The image of the virtual cluster container
+                    properties:
+                      repository:
+                        description: The image repository
+                        type: string
+                      tag:
+                        description: The image tag
+                        type: string
+                    type: object
+                type: object
             type: object
           status:
             description: VirtualClusterStatus defines the observed state of VirtualCluster
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true
