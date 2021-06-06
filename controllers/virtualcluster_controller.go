@@ -24,11 +24,13 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,6 +63,13 @@ const (
 
 const serviceCidr = "10.43.0.0/16"
 
+// createFunc defines a function which will create an object
+type createFunc func(*vclusterv1alpha1.VirtualCluster) client.Object
+
+// reconcileFunc defines a function that will reconcile an object.
+// Return `true` to trigger an update of the object in the cluster.
+type reconcileFunc func(*vclusterv1alpha1.VirtualCluster, client.Object) bool
+
 //+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=clusters/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=clusters/finalizers,verbs=update
@@ -75,13 +84,18 @@ const serviceCidr = "10.43.0.0/16"
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.8.3/pkg/reconcile
 func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	// log := ctrllog.FromContext(ctx)
+	log := ctrllog.FromContext(ctx)
 
 	// Look up the object requested for reconciliation
 	cluster := &vclusterv1alpha1.VirtualCluster{}
 	err := r.Get(ctx, req.NamespacedName, cluster)
 
 	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("cluster not found", "cluster", req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+
 		return ctrl.Result{}, err
 	}
 
@@ -92,58 +106,202 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// ******** ROLE ********
-	res, err = r.reconcileObject(ctx, req, cluster, &rbacv1.Role{}, r.roleForVirtualCluster, noReconcile)
+	res, err = r.reconcileObject(ctx, req, cluster, &rbacv1.Role{}, r.roleForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+		actual := obj.(*rbacv1.Role)
+		expected := r.roleForVirtualCluster(cluster).(*rbacv1.Role)
+
+		if !reflect.DeepEqual(actual.Rules, expected.Rules) {
+			actual.Rules = expected.Rules
+			return true
+		}
+
+		return false
+	})
 	if res != nil || err != nil {
 		return *res, err
 	}
 
 	// ******** ROLE BINDING ********
-	res, err = r.reconcileObject(ctx, req, cluster, &rbacv1.RoleBinding{}, r.roleBindingForVirtualCluster, noReconcile)
+	res, err = r.reconcileObject(ctx, req, cluster, &rbacv1.RoleBinding{}, r.roleBindingForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+		actual := obj.(*rbacv1.RoleBinding)
+		expected := r.roleBindingForVirtualCluster(cluster).(*rbacv1.RoleBinding)
+
+		if !reflect.DeepEqual(actual.RoleRef, expected.RoleRef) || !reflect.DeepEqual(actual.Subjects, expected.Subjects) {
+			actual.RoleRef = expected.RoleRef
+			actual.Subjects = expected.Subjects
+			return true
+		}
+
+		return false
+	})
 	if res != nil || err != nil {
 		return *res, err
 	}
 
 	// ******** CLUSTER ROLE ********
-	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRole{}, r.clusterRoleForVirtualCluster, noReconcile, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRole{}, r.clusterRoleForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+		actual := obj.(*rbacv1.ClusterRole)
+		expected := r.clusterRoleForVirtualCluster(cluster).(*rbacv1.ClusterRole)
+
+		if !reflect.DeepEqual(actual.Rules, expected.Rules) {
+			actual.Rules = expected.Rules
+			return true
+		}
+
+		return false
+	}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
 	if res != nil || err != nil {
 		return *res, err
 	}
 
 	// ******** CLUSTER ROLE BINDING ********
-	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRoleBinding{}, r.clusterRoleBindingForVirtualCluster, noReconcile, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRoleBinding{}, r.clusterRoleBindingForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+		actual := obj.(*rbacv1.ClusterRoleBinding)
+		expected := r.clusterRoleBindingForVirtualCluster(cluster).(*rbacv1.ClusterRoleBinding)
+
+		if !reflect.DeepEqual(actual.RoleRef, expected.RoleRef) || !reflect.DeepEqual(actual.Subjects, expected.Subjects) {
+			actual.RoleRef = expected.RoleRef
+			actual.Subjects = expected.Subjects
+			return true
+		}
+
+		return false
+	}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
 	if res != nil || err != nil {
 		return *res, err
 	}
 
 	// ******** SERVICE ********
-	res, err = r.reconcileObject(ctx, req, cluster, &v1.Service{}, r.serviceForVirtualCluster, noReconcile)
+	res, err = r.reconcileObject(ctx, req, cluster, &v1.Service{}, r.serviceForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+		actual := obj.(*corev1.Service)
+		expected := r.serviceForVirtualCluster(cluster).(*corev1.Service)
+
+		// Sync up ClusterIP field
+		expected.Spec.ClusterIP = actual.Spec.ClusterIP
+		expected.Spec.ClusterIPs = actual.Spec.ClusterIPs
+
+		if !reflect.DeepEqual(actual.Spec, expected.Spec) {
+			actual.Spec = expected.Spec
+			return true
+		}
+
+		return false
+	})
 	if res != nil || err != nil {
 		return *res, err
 	}
 
-	res, err = r.reconcileObjectNamed(ctx, req, cluster, &v1.Service{}, r.headlessServiceForVirtualCluster, noReconcile, fmt.Sprintf("%s-headless", objectName(cluster)))
+	res, err = r.reconcileObjectNamed(ctx, req, cluster, &v1.Service{}, r.headlessServiceForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+		actual := obj.(*corev1.Service)
+		expected := r.headlessServiceForVirtualCluster(cluster).(*corev1.Service)
+
+		// Sync up ClusterIP field
+		expected.Spec.ClusterIP = actual.Spec.ClusterIP
+		expected.Spec.ClusterIPs = actual.Spec.ClusterIPs
+
+		if !reflect.DeepEqual(actual.Spec, expected.Spec) {
+			actual.Spec = expected.Spec
+			return true
+		}
+
+		return false
+	}, fmt.Sprintf("%s-headless", objectName(cluster)))
 	if res != nil || err != nil {
 		return *res, err
 	}
 
 	// ******** STATEFUL SET ********
-	res, err = r.reconcileObject(ctx, req, cluster, &appsv1.StatefulSet{}, r.statefulSetForVirtualCluster, func(obj client.Object) bool {
+	res, err = r.reconcileObject(ctx, req, cluster, &appsv1.StatefulSet{}, r.statefulSetForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+		actual := obj.(*appsv1.StatefulSet)
+		expected := r.statefulSetForVirtualCluster(cluster).(*appsv1.StatefulSet)
+
 		update := false
-		statefulSet := obj.(*appsv1.StatefulSet)
 
-		for indx, container := range statefulSet.Spec.Template.Spec.Containers {
-			switch container.Name {
-			case ContainerNameVirtualCluster:
-				if container.Image != clusterImage(cluster) {
-					update = true
-					statefulSet.Spec.Template.Spec.Containers[indx].Image = clusterImage(cluster)
+		// Containers
+		if len(actual.Spec.Template.Spec.Containers) != len(expected.Spec.Template.Spec.Containers) {
+			update = true
+			actual.Spec.Template.Spec.Containers = expected.Spec.Template.Spec.Containers
+		} else {
+			updateContainers := false
+
+			for indx, actualContainer := range actual.Spec.Template.Spec.Containers {
+				expectedContainer := expected.Spec.Template.Spec.Containers[indx]
+
+				if actualContainer.Name != expectedContainer.Name {
+					updateContainers = true
+					break
 				}
 
-			case ContainerNameSyncer:
-				if container.Image != syncerImage(cluster) {
-					update = true
-					statefulSet.Spec.Template.Spec.Containers[indx].Image = syncerImage(cluster)
+				if actualContainer.Image != expectedContainer.Image {
+					updateContainers = true
+					break
 				}
+
+				if !reflect.DeepEqual(actualContainer.Command, expectedContainer.Command) {
+					updateContainers = true
+					break
+				}
+
+				if !reflect.DeepEqual(actualContainer.Args, expectedContainer.Args) {
+					updateContainers = true
+					break
+				}
+
+				if !reflect.DeepEqual(actualContainer.Ports, expectedContainer.Ports) {
+					updateContainers = true
+					break
+				}
+
+				if !reflect.DeepEqual(actualContainer.VolumeMounts, expectedContainer.VolumeMounts) {
+					updateContainers = true
+					break
+				}
+			}
+
+			if updateContainers {
+				update = true
+				actual.Spec.Template.Spec.Containers = expected.Spec.Template.Spec.Containers
+			}
+		}
+
+		if !reflect.DeepEqual(actual.Spec.Template.Spec.TerminationGracePeriodSeconds, expected.Spec.Template.Spec.TerminationGracePeriodSeconds) {
+			update = true
+			actual.Spec.Template.Spec.TerminationGracePeriodSeconds = expected.Spec.Template.Spec.TerminationGracePeriodSeconds
+		}
+
+		if actual.Spec.Template.Spec.ServiceAccountName != expected.Spec.Template.Spec.ServiceAccountName {
+			update = true
+			actual.Spec.Template.Spec.ServiceAccountName = expected.Spec.Template.Spec.ServiceAccountName
+		}
+
+		if !reflect.DeepEqual(actual.Spec.Template.Spec.Volumes, expected.Spec.Template.Spec.Volumes) {
+			update = true
+			actual.Spec.Template.Spec.Volumes = expected.Spec.Template.Spec.Volumes
+		}
+
+		if len(actual.Spec.VolumeClaimTemplates) != len(expected.Spec.VolumeClaimTemplates) {
+			update = true
+			actual.Spec.VolumeClaimTemplates = expected.Spec.VolumeClaimTemplates
+		} else {
+			updateTemplates := false
+
+			for indx, actualTemplate := range actual.Spec.VolumeClaimTemplates {
+				expectedTemplate := expected.Spec.VolumeClaimTemplates[indx]
+
+				if actualTemplate.ObjectMeta.Name != expectedTemplate.ObjectMeta.Name {
+					updateTemplates = true
+					break
+				}
+
+				if !equality.Semantic.DeepDerivative(actualTemplate.Spec, expectedTemplate.Spec) {
+					updateTemplates = true
+					break
+				}
+			}
+
+			if updateTemplates {
+				update = true
+				actual.Spec.VolumeClaimTemplates = expected.Spec.VolumeClaimTemplates
 			}
 		}
 
@@ -215,7 +373,7 @@ func (r *VirtualClusterReconciler) finalizeVirtualCluster(ctx context.Context, c
 	return nil
 }
 
-func noReconcile(_ client.Object) bool {
+func noReconcile(_ *vclusterv1alpha1.VirtualCluster, _ client.Object) bool {
 	return false
 }
 
@@ -224,8 +382,8 @@ func (r *VirtualClusterReconciler) reconcileObject(
 	req ctrl.Request,
 	cluster *vclusterv1alpha1.VirtualCluster,
 	obj client.Object,
-	createFunc func(cluster *vclusterv1alpha1.VirtualCluster) client.Object,
-	reconcile func(obj client.Object) bool) (*ctrl.Result, error) {
+	createFunc createFunc,
+	reconcile reconcileFunc) (*ctrl.Result, error) {
 	return r.reconcileObjectNamed(ctx, req, cluster, obj, createFunc, reconcile, objectName(cluster))
 }
 
@@ -234,29 +392,29 @@ func (r *VirtualClusterReconciler) reconcileObjectNamed(
 	req ctrl.Request,
 	cluster *vclusterv1alpha1.VirtualCluster,
 	obj client.Object,
-	createFunc func(cluster *vclusterv1alpha1.VirtualCluster) client.Object,
-	reconcile func(obj client.Object) bool,
+	createFunc createFunc,
+	reconcile reconcileFunc,
 	name string) (*ctrl.Result, error) {
 	log := ctrllog.FromContext(ctx)
 
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, obj)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("creating object for cluster", "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
+			log.Info("creating object for cluster", "name", name, "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
 
 			// Create the statefulSet
 			obj = createFunc(cluster)
 			if err = r.Create(ctx, obj); err != nil {
 				if errors.IsAlreadyExists(err) {
-					log.Error(nil, "object for cluster already exists", "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
+					log.Error(nil, "object for cluster already exists", "name", name, "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
 					return &ctrl.Result{Requeue: true}, nil
 				}
 
-				log.Error(err, "failed to create object for cluster", "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
+				log.Error(err, "failed to create object for cluster", "name", name, "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
 				return &ctrl.Result{}, err
 			}
 
-			log.Info("created object for cluster", "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
+			log.Info("created object for cluster", "name", name, "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
 			return &ctrl.Result{Requeue: true}, nil
 		} else {
 			return &ctrl.Result{}, err
@@ -264,15 +422,15 @@ func (r *VirtualClusterReconciler) reconcileObjectNamed(
 	}
 
 	// Run reconciliation of existing object
-	if reconcile(obj) {
-		log.Info("updating object for cluster", "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
+	if reconcile(cluster, obj) {
+		log.Info("updating object for cluster", "object", "name", name, obj.GetObjectKind(), "cluster", req.NamespacedName)
 
 		if err = r.Update(ctx, obj); err != nil {
 			log.Error(err, "failed to update object for cluster", "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
 			return &ctrl.Result{}, err
 		}
 
-		log.Info("updated object for cluster", "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
+		log.Info("updated object for cluster", "name", name, "object", obj.GetObjectKind(), "cluster", req.NamespacedName)
 		return &ctrl.Result{Requeue: true}, nil
 	}
 
@@ -287,6 +445,8 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
+		Owns(&rbacv1.ClusterRole{}).
+		Owns(&rbacv1.ClusterRoleBinding{}).
 		Owns(&corev1.Service{}).
 		Owns(&appsv1.StatefulSet{}).
 		Complete(r)
@@ -301,6 +461,14 @@ func toInt32Ptr(val int32) *int32 {
 }
 
 func toInt64Ptr(val int64) *int64 {
+	return &val
+}
+
+func toStringPtr(val string) *string {
+	return &val
+}
+
+func toPtr(val interface{}) *interface{} {
 	return &val
 }
 
@@ -508,7 +676,8 @@ func (r *VirtualClusterReconciler) serviceForVirtualCluster(cluster *vclusterv1a
 					Protocol:   v1.ProtocolTCP,
 				},
 			},
-			Selector: selectorLabelsForVirtualCluster(cluster),
+			Selector:        selectorLabelsForVirtualCluster(cluster),
+			SessionAffinity: v1.ServiceAffinityNone,
 		},
 	}
 
@@ -535,7 +704,8 @@ func (r *VirtualClusterReconciler) headlessServiceForVirtualCluster(cluster *vcl
 					Protocol:   v1.ProtocolTCP,
 				},
 			},
-			Selector: selectorLabelsForVirtualCluster(cluster),
+			Selector:        selectorLabelsForVirtualCluster(cluster),
+			SessionAffinity: v1.ServiceAffinityNone,
 		},
 	}
 
@@ -544,6 +714,8 @@ func (r *VirtualClusterReconciler) headlessServiceForVirtualCluster(cluster *vcl
 }
 
 func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
+	volumeModeFilesystem := corev1.PersistentVolumeFilesystem
+
 	statefulSet := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        objectName(cluster),
@@ -627,6 +799,7 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 								corev1.ResourceStorage: *resource.NewQuantity(5*1024*1024*1024, resource.BinarySI),
 							},
 						},
+						VolumeMode: &volumeModeFilesystem,
 					},
 				},
 			},
