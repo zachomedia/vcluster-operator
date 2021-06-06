@@ -27,8 +27,17 @@ import (
 
 // VirtualClusterSpec defines the desired state of VirtualCluster
 type VirtualClusterSpec struct {
-	// Image sets the image of the control plane of the virtual cluster
-	Image string `json:"image,omitempty"`
+	// Images sets the images of the control plane of the virtual cluster
+	Images VirtualClusterImages `json:"images,omitempty"`
+}
+
+// VirtualClusterImages defines the images used by a virtual cluster
+type VirtualClusterImages struct {
+	// Cluster is the cluster control plane image (usually rancher/k3s)
+	Cluster string `json:"cluster,omitempty"`
+
+	// Syncer is the virtual cluster data syncer (usually loftsh/vcluster)
+	Syncer string `json:"syncer,omitempty"`
 }
 
 // VirtualClusterStatus defines the observed state of VirtualCluster
@@ -37,8 +46,9 @@ type VirtualClusterStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:resource:path=virtualclusters,shortName=vc
-//+kubebuilder:printcolumn:name="Image",type="string",JSONPath=".spec.image",description="The image of the control plane"
+//+kubebuilder:resource:path=virtualclusters,shortName=vc;vcluster
+//+kubebuilder:printcolumn:name="Cluster Image",type="string",JSONPath=".spec.images.cluster",description="The image of the control plane"
+//+kubebuilder:printcolumn:name="Syncer Image",type="string",JSONPath=".spec.images.syncer",description="The image of the syncer"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of this resource"
 
 // VirtualCluster is the Schema for the virtualclusters API

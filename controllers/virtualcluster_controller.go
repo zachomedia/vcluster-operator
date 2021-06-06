@@ -52,6 +52,11 @@ type VirtualClusterReconciler struct {
 const (
 	DefaultVirtualClusterImage = "rancher/k3s:v1.19.5-k3s2"
 	DefaultSyncerImage         = "loftsh/vcluster:0.2.0"
+
+	ContainerNameVirtualCluster = "virtual-cluster"
+	ContainerNameSyncer         = "syncer"
+
+	clusterFinalizer = "vcluster.zacharyseguin.ca/finalizer"
 )
 
 const serviceCidr = "10.43.0.0/16"
@@ -98,6 +103,18 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return *res, err
 	}
 
+	// ******** CLUSTER ROLE ********
+	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRole{}, r.clusterRoleForVirtualCluster, noReconcile, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+	if res != nil || err != nil {
+		return *res, err
+	}
+
+	// ******** CLUSTER ROLE BINDING ********
+	res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRoleBinding{}, r.clusterRoleBindingForVirtualCluster, noReconcile, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+	if res != nil || err != nil {
+		return *res, err
+	}
+
 	// ******** SERVICE ********
 	res, err = r.reconcileObject(ctx, req, cluster, &v1.Service{}, r.serviceForVirtualCluster, noReconcile)
 	if res != nil || err != nil {
@@ -115,10 +132,17 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		statefulSet := obj.(*appsv1.StatefulSet)
 
 		for indx, container := range statefulSet.Spec.Template.Spec.Containers {
-			if container.Name == "virtual-cluster" {
+			switch container.Name {
+			case ContainerNameVirtualCluster:
 				if container.Image != clusterImage(cluster) {
 					update = true
 					statefulSet.Spec.Template.Spec.Containers[indx].Image = clusterImage(cluster)
+				}
+
+			case ContainerNameSyncer:
+				if container.Image != syncerImage(cluster) {
+					update = true
+					statefulSet.Spec.Template.Spec.Containers[indx].Image = syncerImage(cluster)
 				}
 			}
 		}
@@ -130,7 +154,65 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return *res, err
 	}
 
+	// *** FINALIZER ***
+	// Run finalizer if the object is to be deleted
+	if cluster.DeletionTimestamp != nil {
+		if controllerutil.ContainsFinalizer(cluster, clusterFinalizer) {
+			if err := r.finalizeVirtualCluster(ctx, cluster); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			controllerutil.RemoveFinalizer(cluster, clusterFinalizer)
+			err := r.Update(ctx, cluster)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer, if unset
+	if !controllerutil.ContainsFinalizer(cluster, clusterFinalizer) {
+		controllerutil.AddFinalizer(cluster, clusterFinalizer)
+		err = r.Update(ctx, cluster)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *VirtualClusterReconciler) finalizeVirtualCluster(ctx context.Context, cluster *vclusterv1alpha1.VirtualCluster) error {
+	// Delete ClusterRole and ClusterRoleBinding
+	clusterRole := &rbacv1.ClusterRole{}
+	err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, cluster.Name)}, clusterRole)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	} else {
+		err = r.Delete(ctx, clusterRole)
+		if err != nil {
+			return err
+		}
+	}
+
+	clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, cluster.Name)}, clusterRoleBinding)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	} else {
+		err = r.Delete(ctx, clusterRoleBinding)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func noReconcile(_ client.Object) bool {
@@ -223,14 +305,18 @@ func toInt64Ptr(val int64) *int64 {
 }
 
 func clusterImage(cluster *vclusterv1alpha1.VirtualCluster) string {
-	if cluster.Spec.Image != "" {
-		return cluster.Spec.Image
+	if cluster.Spec.Images.Cluster != "" {
+		return cluster.Spec.Images.Cluster
 	}
 
 	return DefaultVirtualClusterImage
 }
 
 func syncerImage(cluster *vclusterv1alpha1.VirtualCluster) string {
+	if cluster.Spec.Images.Syncer != "" {
+		return cluster.Spec.Images.Syncer
+	}
+
 	return DefaultSyncerImage
 }
 
@@ -321,6 +407,40 @@ func (r *VirtualClusterReconciler) roleForVirtualCluster(cluster *vclusterv1alph
 	return role
 }
 
+func (r *VirtualClusterReconciler) clusterRoleForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
+	clusterRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)),
+			Labels:      labelsForVirtualCluster(cluster),
+			Annotations: cluster.Annotations,
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"nodes", "nodes/status"},
+				Verbs:     []string{"get", "watch", "list", "update", "patch"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"pods", "nodes/proxy", "nodes/metrics", "nodes/stats", "persistentvolumes"},
+				Verbs:     []string{"get", "watch", "list"},
+			},
+			{
+				APIGroups: []string{"storage.k8s.io"},
+				Resources: []string{"storageclasses"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups: []string{"scheduling.k8s.io"},
+				Resources: []string{"priorityclasses"},
+				Verbs:     []string{"*"},
+			},
+		},
+	}
+
+	return clusterRole
+}
+
 func (r *VirtualClusterReconciler) roleBindingForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	roleBinding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
@@ -343,6 +463,30 @@ func (r *VirtualClusterReconciler) roleBindingForVirtualCluster(cluster *vcluste
 	}
 
 	controllerutil.SetControllerReference(cluster, roleBinding, r.Scheme)
+	return roleBinding
+}
+
+func (r *VirtualClusterReconciler) clusterRoleBindingForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
+	roleBinding := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)),
+			Labels:      labelsForVirtualCluster(cluster),
+			Annotations: cluster.Annotations,
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.SchemeGroupVersion.Group,
+			Kind:     "ClusterRole",
+			Name:     fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)),
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      rbacv1.ServiceAccountKind,
+				Name:      objectName(cluster),
+				Namespace: cluster.Namespace,
+			},
+		},
+	}
+
 	return roleBinding
 }
 
@@ -422,7 +566,7 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 					ServiceAccountName:            objectName(cluster),
 					Containers: []corev1.Container{
 						{
-							Name:    "virtual-cluster",
+							Name:    ContainerNameVirtualCluster,
 							Image:   clusterImage(cluster),
 							Command: []string{"/bin/k3s"},
 							Args: []string{
@@ -453,7 +597,7 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 							},
 						},
 						{
-							Name:  "syncer",
+							Name:  ContainerNameSyncer,
 							Image: syncerImage(cluster),
 							Args: []string{
 								fmt.Sprintf("--service-name=%s", objectName(cluster)),
