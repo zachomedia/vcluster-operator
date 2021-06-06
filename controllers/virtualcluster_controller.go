@@ -29,6 +29,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -208,6 +209,34 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}, fmt.Sprintf("%s-headless", objectName(cluster)))
 	if res != nil || err != nil {
 		return *res, err
+	}
+
+	// ******** INGRESS ********
+	if cluster.Spec.Ingress != nil {
+		res, err = r.reconcileObject(ctx, req, cluster, &networkingv1.Ingress{}, r.ingressForCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
+			actual := obj.(*networkingv1.Ingress)
+			expected := r.ingressForCluster(cluster).(*networkingv1.Ingress)
+
+			if !reflect.DeepEqual(actual.Spec, expected.Spec) {
+				actual.Spec = expected.Spec
+				return true
+			}
+
+			return false
+		})
+		if res != nil || err != nil {
+			return *res, err
+		}
+	} else {
+		ingress := &networkingv1.Ingress{}
+		if err := r.Get(ctx, req.NamespacedName, ingress); err == nil {
+			log.Info("removing ingress for cluster", "cluster", req.NamespacedName)
+			err = r.Delete(ctx, ingress)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
 	}
 
 	// ******** STATEFUL SET ********
@@ -448,12 +477,9 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.ClusterRole{}).
 		Owns(&rbacv1.ClusterRoleBinding{}).
 		Owns(&corev1.Service{}).
+		Owns(&networkingv1.Ingress{}).
 		Owns(&appsv1.StatefulSet{}).
 		Complete(r)
-}
-
-func toIntPtr(val int) *int {
-	return &val
 }
 
 func toInt32Ptr(val int32) *int32 {
@@ -461,14 +487,6 @@ func toInt32Ptr(val int32) *int32 {
 }
 
 func toInt64Ptr(val int64) *int64 {
-	return &val
-}
-
-func toStringPtr(val string) *string {
-	return &val
-}
-
-func toPtr(val interface{}) *interface{} {
 	return &val
 }
 
@@ -711,6 +729,57 @@ func (r *VirtualClusterReconciler) headlessServiceForVirtualCluster(cluster *vcl
 
 	controllerutil.SetControllerReference(cluster, service, r.Scheme)
 	return service
+}
+
+func (r *VirtualClusterReconciler) ingressForCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
+	pathTypePrefix := networkingv1.PathTypePrefix
+
+	ingress := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        objectName(cluster),
+			Namespace:   cluster.Namespace,
+			Labels:      labelsForVirtualCluster(cluster),
+			Annotations: cluster.Annotations,
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: cluster.Spec.Ingress.IngressClassName,
+			Rules: []networkingv1.IngressRule{
+				{
+					Host: cluster.Spec.Ingress.Hostname,
+					IngressRuleValue: networkingv1.IngressRuleValue{
+						HTTP: &networkingv1.HTTPIngressRuleValue{
+							Paths: []networkingv1.HTTPIngressPath{
+								{
+									Path:     "/",
+									PathType: &pathTypePrefix,
+									Backend: networkingv1.IngressBackend{
+										Service: &networkingv1.IngressServiceBackend{
+											Name: objectName(cluster),
+											Port: networkingv1.ServiceBackendPort{
+												Name: "https",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if cluster.Spec.Ingress.TLSSecretName != nil {
+		ingress.Spec.TLS = []networkingv1.IngressTLS{
+			{
+				Hosts:      []string{cluster.Spec.Ingress.Hostname},
+				SecretName: *cluster.Spec.Ingress.TLSSecretName,
+			},
+		}
+	}
+
+	controllerutil.SetControllerReference(cluster, ingress, r.Scheme)
+	return ingress
 }
 
 func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {

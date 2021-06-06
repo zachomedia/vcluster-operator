@@ -29,6 +29,9 @@ import (
 type VirtualClusterSpec struct {
 	// Images sets the images of the control plane of the virtual cluster
 	Images VirtualClusterImages `json:"images,omitempty"`
+
+	// Specify the ingress template for the cluster
+	Ingress *VirtualClusterIngress `json:"ingress,omitempty"`
 }
 
 // VirtualClusterImages defines the images used by a virtual cluster
@@ -38,6 +41,12 @@ type VirtualClusterImages struct {
 
 	// Syncer is the virtual cluster data syncer (usually loftsh/vcluster)
 	Syncer string `json:"syncer,omitempty"`
+}
+
+type VirtualClusterIngress struct {
+	IngressClassName *string `json:"ingressClassName,omitempty"`
+	Hostname         string  `json:"hostname"`
+	TLSSecretName    *string `json:"tlsSecretName,omitempty"`
 }
 
 // VirtualClusterStatus defines the observed state of VirtualCluster

@@ -65,6 +65,18 @@ spec:
                       loftsh/vcluster)
                     type: string
                 type: object
+              ingress:
+                description: Specify the ingress template for the cluster
+                properties:
+                  hostname:
+                    type: string
+                  ingressClassName:
+                    type: string
+                  tlsSecretName:
+                    type: string
+                required:
+                - hostname
+                type: object
             type: object
           status:
             description: VirtualClusterStatus defines the observed state of VirtualCluster
