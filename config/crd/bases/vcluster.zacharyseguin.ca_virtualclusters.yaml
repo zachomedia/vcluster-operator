@@ -21,8 +21,8 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: The image of the control plane
-      jsonPath: .spec.cluster.image.tag
-      name: Cluster Image
+      jsonPath: .spec.controlPlane.image.tag
+      name: Control Plane Image
       type: string
     - description: The image of the syncer
       jsonPath: .spec.syncer.image.tag

@@ -114,7 +114,7 @@ type VirtualClusterStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:path=virtualclusters,shortName=vc;vcluster
-//+kubebuilder:printcolumn:name="Cluster Image",type="string",JSONPath=".spec.cluster.image.tag",description="The image of the control plane"
+//+kubebuilder:printcolumn:name="Control Plane Image",type="string",JSONPath=".spec.controlPlane.image.tag",description="The image of the control plane"
 //+kubebuilder:printcolumn:name="Syncer Image",type="string",JSONPath=".spec.syncer.image.tag",description="The image of the syncer"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of this resource"
 

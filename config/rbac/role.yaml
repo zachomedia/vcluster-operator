@@ -7,9 +7,63 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterrolebindings
+  - clusterroles
+  - rolebindings
+  - roles
+  verbs:
+  - bind
+  - create
+  - delete
+  - escalate
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - vcluster.zacharyseguin.ca
   resources:
-  - clusters
+  - virtualclusters
   verbs:
   - create
   - delete
@@ -21,13 +75,13 @@ rules:
 - apiGroups:
   - vcluster.zacharyseguin.ca
   resources:
-  - clusters/finalizers
+  - virtualclusters/finalizers
   verbs:
   - update
 - apiGroups:
   - vcluster.zacharyseguin.ca
   resources:
-  - clusters/status
+  - virtualclusters/status
   verbs:
   - get
   - patch

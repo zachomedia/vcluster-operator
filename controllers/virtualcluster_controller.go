@@ -72,9 +72,13 @@ type createFunc func(*vclusterv1alpha1.VirtualCluster) client.Object
 // Return `true` to trigger an update of the object in the cluster.
 type reconcileFunc func(*vclusterv1alpha1.VirtualCluster, client.Object) bool
 
-//+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=clusters,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=clusters/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=clusters/finalizers,verbs=update
+//+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=virtualclusters,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=serviceaccounts;services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+//+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=virtualclusters/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=vcluster.zacharyseguin.ca,resources=virtualclusters/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

@@ -27,3 +27,8 @@ spec:
       tag: 0.3.0-beta.0
     extraArgs:
       - --tls-san=beta-d00dc6.vcluster.onzs.ca
+  nodeSync:
+    strategy: RealLabelSelector
+    selectorLabels:
+      node-role.kubernetes.io/worker: 'true'
+    enforceNodeSelector: true
