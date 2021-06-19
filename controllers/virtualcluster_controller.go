@@ -54,16 +54,30 @@ type VirtualClusterReconciler struct {
 }
 
 const (
+	// DefaultVirtualClusterImage is the default cluster image used
+	// when it is unspecified in a VirtuaCluster resource.
 	DefaultVirtualClusterImage = "rancher/k3s:v1.19.5-k3s2"
-	DefaultSyncerImage         = "loftsh/vcluster:0.2.0"
 
+	// DefaultSyncerImage is the default syncher image used
+	// when it is unspecified in a VirtualCluster resource.
+	DefaultSyncerImage = "loftsh/vcluster:0.2.0"
+
+	// ContainerNameVirtualCluster is the name of the virtual cluster
+	// container on the generated StatefulSet.
 	ContainerNameVirtualCluster = "virtual-cluster"
-	ContainerNameSyncer         = "syncer"
 
-	clusterFinalizer = "vcluster.zacharyseguin.ca/finalizer"
+	// ContainerNameSyncer is the name of the syncher container
+	// on the generated StatefulSet.
+	ContainerNameSyncer = "syncer"
+
+	// ClusterFinalizer is the name of the cluster finalizer.
+	ClusterFinalizer = "vcluster.zacharyseguin.ca/finalizer"
 )
 
-const serviceCidr = "10.43.0.0/16"
+// serviceCide contains the service range for the host cluster.
+//
+// TODO: Make this a command line argument and/or dynamically obtain this value.
+var serviceCidr = "10.43.0.0/16"
 
 // createFunc defines a function which will create an object
 type createFunc func(*vclusterv1alpha1.VirtualCluster) client.Object
@@ -375,12 +389,12 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// *** FINALIZER ***
 	// Run finalizer if the object is to be deleted
 	if cluster.DeletionTimestamp != nil {
-		if controllerutil.ContainsFinalizer(cluster, clusterFinalizer) {
+		if controllerutil.ContainsFinalizer(cluster, ClusterFinalizer) {
 			if err := r.finalizeVirtualCluster(ctx, cluster); err != nil {
 				return ctrl.Result{}, err
 			}
 
-			controllerutil.RemoveFinalizer(cluster, clusterFinalizer)
+			controllerutil.RemoveFinalizer(cluster, ClusterFinalizer)
 			err := r.Update(ctx, cluster)
 			if err != nil {
 				return ctrl.Result{}, err
@@ -391,8 +405,8 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Add finalizer, if unset
-	if !controllerutil.ContainsFinalizer(cluster, clusterFinalizer) {
-		controllerutil.AddFinalizer(cluster, clusterFinalizer)
+	if !controllerutil.ContainsFinalizer(cluster, ClusterFinalizer) {
+		controllerutil.AddFinalizer(cluster, ClusterFinalizer)
 		err = r.Update(ctx, cluster)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -402,6 +416,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
+// finalizeVirtualCluster runs cleanup of resources that will not be garbage collected by Kubernetes.
 func (r *VirtualClusterReconciler) finalizeVirtualCluster(ctx context.Context, cluster *vclusterv1alpha1.VirtualCluster) error {
 	// Delete ClusterRole and ClusterRoleBinding
 	clusterRole := &rbacv1.ClusterRole{}
@@ -433,10 +448,14 @@ func (r *VirtualClusterReconciler) finalizeVirtualCluster(ctx context.Context, c
 	return nil
 }
 
+// noReconcile will always return `false` to never trigger reconciliation.
 func noReconcile(_ *vclusterv1alpha1.VirtualCluster, _ client.Object) bool {
 	return false
 }
 
+// reconcileObject reconciles an object created by the controller.
+//
+// The object reconciled will is named the default object name returned by `objectName(string)`
 func (r *VirtualClusterReconciler) reconcileObject(
 	ctx context.Context,
 	req ctrl.Request,
@@ -447,6 +466,7 @@ func (r *VirtualClusterReconciler) reconcileObject(
 	return r.reconcileObjectNamed(ctx, req, cluster, obj, createFunc, reconcile, objectName(cluster))
 }
 
+// reconcileObjectNamed reconciles the named object created by the controller.
 func (r *VirtualClusterReconciler) reconcileObjectNamed(
 	ctx context.Context,
 	req ctrl.Request,
@@ -513,24 +533,32 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// toInt32Ptr converts an `int32` value as a pointer.
 func toInt32Ptr(val int32) *int32 {
 	return &val
 }
 
+// toInt64Ptr returns an `int64` value as a pointer.
 func toInt64Ptr(val int64) *int64 {
 	return &val
 }
 
+// labelsForVirtualCluster returns the object labels the given virtual cluster.
+//
+// All labels applied to a cluster are copied to the resources created by the controller.
 func labelsForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) map[string]string {
+	// Copy any labels from the cluster object istself
 	labels := cluster.DeepCopy().Labels
 	if labels == nil {
 		labels = make(map[string]string)
 	}
 
-	labels["app.kubernetes.io/name"] = "vcluster"
-	labels["app.kubernetes.io/component"] = "control-plane"
-	labels["app.kubernetes.io/instance"] = cluster.Name
-	// labels["app.kubernetes.io/version"] = cluster.Spec.Image
+	// Add selector labels
+	for k, v := range selectorLabelsForVirtualCluster(cluster) {
+		labels[k] = v
+	}
+
+	// Add labels to track the "ownership" of these resources
 	labels["app.kubernetes.io/managed-by"] = "vcluster-operator"
 	labels["app.kubernetes.io/created-by"] = "vcluster-operator"
 
@@ -541,6 +569,7 @@ func labelsForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) map[strin
 	return labels
 }
 
+// selectorLabelsForVirtualClsuter returns selector labels for a given virtual cluster.
 func selectorLabelsForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":      "vcluster",
@@ -549,6 +578,8 @@ func selectorLabelsForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) m
 	}
 }
 
+// objectName returns the standard name of objects created by the controller
+// for the given virtual cluster.
 func objectName(cluster *vclusterv1alpha1.VirtualCluster) string {
 	// To prevent collision with default
 	if cluster.Name == "default" {
@@ -558,6 +589,7 @@ func objectName(cluster *vclusterv1alpha1.VirtualCluster) string {
 	return cluster.Name
 }
 
+// serviceAccountForVirtualCluster returns the ServiceAccount object for the given cluster.
 func (r *VirtualClusterReconciler) serviceAccountForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	serviceAccount := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
@@ -572,6 +604,7 @@ func (r *VirtualClusterReconciler) serviceAccountForVirtualCluster(cluster *vclu
 	return serviceAccount
 }
 
+// roleForVirtualCluster returns the Role object for the given virtual cluster.
 func (r *VirtualClusterReconciler) roleForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
@@ -608,6 +641,7 @@ func (r *VirtualClusterReconciler) roleForVirtualCluster(cluster *vclusterv1alph
 	return role
 }
 
+// clusterRoleForVirtualCluster returns the ClusterRole object for the given virtual cluster.
 func (r *VirtualClusterReconciler) clusterRoleForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	clusterRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
@@ -642,6 +676,7 @@ func (r *VirtualClusterReconciler) clusterRoleForVirtualCluster(cluster *vcluste
 	return clusterRole
 }
 
+// roleBindingForVirtualCluster returns the RoleBinding object for the given virtual cluster.
 func (r *VirtualClusterReconciler) roleBindingForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	roleBinding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
@@ -667,6 +702,7 @@ func (r *VirtualClusterReconciler) roleBindingForVirtualCluster(cluster *vcluste
 	return roleBinding
 }
 
+// clusterRoleBindingForVirtualCluster returns the ClusterRole object for the given virtual cluster.
 func (r *VirtualClusterReconciler) clusterRoleBindingForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	roleBinding := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
@@ -691,6 +727,7 @@ func (r *VirtualClusterReconciler) clusterRoleBindingForVirtualCluster(cluster *
 	return roleBinding
 }
 
+// serviceForVirtualCluster returns the Service object for the virtual cluster.
 func (r *VirtualClusterReconciler) serviceForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -718,6 +755,7 @@ func (r *VirtualClusterReconciler) serviceForVirtualCluster(cluster *vclusterv1a
 	return service
 }
 
+// headlessServiceForVirtualCluster returns the headless Service object for the given cluster.
 func (r *VirtualClusterReconciler) headlessServiceForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -746,6 +784,7 @@ func (r *VirtualClusterReconciler) headlessServiceForVirtualCluster(cluster *vcl
 	return service
 }
 
+// ingressForCluster returns the Ingress object for the virtual cluster.
 func (r *VirtualClusterReconciler) ingressForCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	pathTypePrefix := networkingv1.PathTypePrefix
 
@@ -797,6 +836,7 @@ func (r *VirtualClusterReconciler) ingressForCluster(cluster *vclusterv1alpha1.V
 	return ingress
 }
 
+// statefulSetForVirtualCluster returns the StatefulSet object for the given virtual cluster.
 func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	volumeModeFilesystem := corev1.PersistentVolumeFilesystem
 
