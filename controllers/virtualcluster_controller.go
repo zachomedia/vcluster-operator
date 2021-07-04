@@ -119,6 +119,15 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	// Add finalizer, if unset
+	if !controllerutil.ContainsFinalizer(cluster, ClusterFinalizer) {
+		controllerutil.AddFinalizer(cluster, ClusterFinalizer)
+		err = r.Update(ctx, cluster)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	// ******** SERVICE ACCOUNT ********
 	res, err := r.reconcileObject(ctx, req, cluster, &corev1.ServiceAccount{}, r.serviceAccountForVirtualCluster, noReconcile)
 	if res != nil || err != nil {
@@ -159,7 +168,8 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// ******** CLUSTER ROLE ********
-	if cluster.Spec.NodeSync.Strategy != vclusterv1alpha1.VirtualClusterNodeSyncStrategyFake {
+	clusterRole := r.clusterRoleForVirtualCluster(cluster)
+	if clusterRole != nil {
 		res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRole{}, r.clusterRoleForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
 			actual := obj.(*rbacv1.ClusterRole)
 			expected := r.clusterRoleForVirtualCluster(cluster).(*rbacv1.ClusterRole)
@@ -170,23 +180,12 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 
 			return false
-		}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+		}, fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster)))
 		if res != nil || err != nil {
 			return *res, err
 		}
-	} else {
-		obj := &rbacv1.ClusterRole{}
-		if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster))}, obj); err == nil {
-			log.Info("removing cluster role for cluster", "cluster", req.NamespacedName)
-			err = r.Delete(ctx, obj)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	}
 
-	// ******** CLUSTER ROLE BINDING ********
-	if cluster.Spec.NodeSync.Strategy != vclusterv1alpha1.VirtualClusterNodeSyncStrategyFake {
+		// ******** CLUSTER ROLE BINDING ********
 		res, err = r.reconcileObjectNamed(ctx, req, cluster, &rbacv1.ClusterRoleBinding{}, r.clusterRoleBindingForVirtualCluster, func(cluster *vclusterv1alpha1.VirtualCluster, obj client.Object) bool {
 			actual := obj.(*rbacv1.ClusterRoleBinding)
 			expected := r.clusterRoleBindingForVirtualCluster(cluster).(*rbacv1.ClusterRoleBinding)
@@ -198,15 +197,24 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 
 			return false
-		}, fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)))
+		}, fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster)))
 		if res != nil || err != nil {
 			return *res, err
 		}
 	} else {
-		obj := &rbacv1.ClusterRoleBinding{}
-		if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster))}, obj); err == nil {
+		role := &rbacv1.ClusterRole{}
+		if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster))}, role); err == nil {
+			log.Info("removing cluster role for cluster", "cluster", req.NamespacedName)
+			err = r.Delete(ctx, role)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		roleBinding := &rbacv1.ClusterRoleBinding{}
+		if err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster))}, roleBinding); err == nil {
 			log.Info("removing cluster role binding for cluster", "cluster", req.NamespacedName)
-			err = r.Delete(ctx, obj)
+			err = r.Delete(ctx, roleBinding)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -404,15 +412,6 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	// Add finalizer, if unset
-	if !controllerutil.ContainsFinalizer(cluster, ClusterFinalizer) {
-		controllerutil.AddFinalizer(cluster, ClusterFinalizer)
-		err = r.Update(ctx, cluster)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -420,7 +419,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *VirtualClusterReconciler) finalizeVirtualCluster(ctx context.Context, cluster *vclusterv1alpha1.VirtualCluster) error {
 	// Delete ClusterRole and ClusterRoleBinding
 	clusterRole := &rbacv1.ClusterRole{}
-	err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, cluster.Name)}, clusterRole)
+	err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, cluster.Name)}, clusterRole)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return err
@@ -433,7 +432,7 @@ func (r *VirtualClusterReconciler) finalizeVirtualCluster(ctx context.Context, c
 	}
 
 	clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
-	err = r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", cluster.Namespace, cluster.Name)}, clusterRoleBinding)
+	err = r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, cluster.Name)}, clusterRoleBinding)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return err
@@ -617,17 +616,17 @@ func (r *VirtualClusterReconciler) roleForVirtualCluster(cluster *vclusterv1alph
 			{
 				APIGroups: []string{""},
 				Resources: []string{"configmaps", "secrets", "services", "services/proxy", "pods", "pods/proxy", "pods/attach", "pods/portforward", "pods/exec", "pods/log", "events", "endpoints", "persistentvolumeclaims"},
-				Verbs:     []string{"*"},
+				Verbs:     []string{"create", "delete", "patch", "update", "get", "list", "watch"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"events", "pods/log"},
+				Verbs:     []string{"get", "list", "watch"},
 			},
 			{
 				APIGroups: []string{"networking.k8s.io"},
 				Resources: []string{"ingresses"},
-				Verbs:     []string{"*"},
-			},
-			{
-				APIGroups: []string{""},
-				Resources: []string{"namespaces"},
-				Verbs:     []string{"get", "list", "watch"},
+				Verbs:     []string{"create", "delete", "patch", "update", "get", "list", "watch"},
 			},
 			{
 				APIGroups: []string{"apps"},
@@ -645,32 +644,65 @@ func (r *VirtualClusterReconciler) roleForVirtualCluster(cluster *vclusterv1alph
 func (r *VirtualClusterReconciler) clusterRoleForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	clusterRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)),
+			Name:        fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster)),
 			Labels:      labelsForVirtualCluster(cluster),
 			Annotations: cluster.Annotations,
 		},
-		Rules: []rbacv1.PolicyRule{
-			{
+		Rules: []rbacv1.PolicyRule{},
+	}
+
+	// If using node synching, then enable node rules
+	if cluster.Spec.NodeSync.Strategy != vclusterv1alpha1.VirtualClusterNodeSyncStrategyFake {
+		clusterRole.Rules = append(clusterRole.Rules,
+			rbacv1.PolicyRule{
 				APIGroups: []string{""},
 				Resources: []string{"nodes", "nodes/status"},
 				Verbs:     []string{"get", "watch", "list", "update", "patch"},
 			},
-			{
+			rbacv1.PolicyRule{
 				APIGroups: []string{""},
-				Resources: []string{"pods", "nodes/proxy", "nodes/metrics", "nodes/stats", "persistentvolumes"},
+				Resources: []string{"pods", "nodes/proxy", "nodes/metrics", "nodes/stats"},
 				Verbs:     []string{"get", "watch", "list"},
 			},
-			{
+		)
+	}
+
+	// If we are synching storage classes, then enable the appropriate permissions
+	if cluster.Spec.Storage.EnableStorageClasses {
+		clusterRole.Rules = append(clusterRole.Rules,
+			rbacv1.PolicyRule{
 				APIGroups: []string{"storage.k8s.io"},
 				Resources: []string{"storageclasses"},
 				Verbs:     []string{"get", "list", "watch"},
 			},
-			{
+		)
+	}
+
+	// If we are synching persistent volumes
+	if cluster.Spec.Storage.SyncPersistentVolumes {
+		clusterRole.Rules = append(clusterRole.Rules,
+			rbacv1.PolicyRule{
+				APIGroups: []string{""},
+				Resources: []string{"persistentvolumes"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+		)
+	}
+
+	// If we are using pod priority classes, then enable the appropriate permissions
+	if cluster.Spec.PodScheduling.EnablePriorityClasses {
+		clusterRole.Rules = append(clusterRole.Rules,
+			rbacv1.PolicyRule{
 				APIGroups: []string{"scheduling.k8s.io"},
 				Resources: []string{"priorityclasses"},
-				Verbs:     []string{"*"},
+				Verbs:     []string{"create", "delete", "patch", "update", "get", "list", "watch"},
 			},
-		},
+		)
+	}
+
+	// If we don't have any rules, then let's not return an object
+	if len(clusterRole.Rules) == 0 {
+		return nil
 	}
 
 	return clusterRole
@@ -706,14 +738,14 @@ func (r *VirtualClusterReconciler) roleBindingForVirtualCluster(cluster *vcluste
 func (r *VirtualClusterReconciler) clusterRoleBindingForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	roleBinding := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)),
+			Name:        fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster)),
 			Labels:      labelsForVirtualCluster(cluster),
 			Annotations: cluster.Annotations,
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacv1.SchemeGroupVersion.Group,
 			Kind:     "ClusterRole",
-			Name:     fmt.Sprintf("%s-%s", cluster.Namespace, objectName(cluster)),
+			Name:     fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster)),
 		},
 		Subjects: []rbacv1.Subject{
 			{
@@ -840,26 +872,34 @@ func (r *VirtualClusterReconciler) ingressForCluster(cluster *vclusterv1alpha1.V
 func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) client.Object {
 	volumeModeFilesystem := corev1.PersistentVolumeFilesystem
 
+	syncArgs := []string{}
+
 	// Set node sync args
-	nodeSyncArgs := []string{}
 	switch cluster.Spec.NodeSync.Strategy {
 	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyFake:
-		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes")
+		syncArgs = append(syncArgs, "--fake-nodes")
 	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyReal:
-		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes=false")
+		syncArgs = append(syncArgs, "--fake-nodes=false")
 	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyRealAll:
-		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes=false", "--sync-all-nodes")
+		syncArgs = append(syncArgs, "--fake-nodes=false", "--sync-all-nodes")
 	case vclusterv1alpha1.VirtualClusterNodeSyncStrategyRealLabelSelector:
 		labels := []string{}
 		for k, v := range cluster.Spec.NodeSync.SelectorLabels {
 			labels = append(labels, fmt.Sprintf("%s=%s", k, v))
 		}
-		nodeSyncArgs = append(nodeSyncArgs, "--fake-nodes=false", fmt.Sprintf("--node-selector=%s", strings.Join(labels, ",")))
+		syncArgs = append(syncArgs, "--fake-nodes=false", fmt.Sprintf("--node-selector=%s", strings.Join(labels, ",")))
 
 		if cluster.Spec.NodeSync.EnforceNodeSelector {
-			nodeSyncArgs = append(nodeSyncArgs, "--enforce-node-selector")
+			syncArgs = append(syncArgs, "--enforce-node-selector")
 		}
 	}
+
+	// Pod scheduling
+	syncArgs = append(syncArgs, fmt.Sprintf("--enable-priority-classes=%t", cluster.Spec.PodScheduling.EnablePriorityClasses))
+
+	// Set storage flags
+	syncArgs = append(syncArgs, fmt.Sprintf("--enable-storage-classes=%t", cluster.Spec.Storage.EnableStorageClasses))
+	syncArgs = append(syncArgs, fmt.Sprintf("--fake-persistent-volumes=%t", !cluster.Spec.Storage.SyncPersistentVolumes))
 
 	statefulSet := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -921,7 +961,7 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 								fmt.Sprintf("--suffix=%s", objectName(cluster)),
 								fmt.Sprintf("--owning-statefulset=%s", objectName(cluster)),
 								fmt.Sprintf("--out-kube-config-secret=%s", objectName(cluster)),
-							}, append(nodeSyncArgs, cluster.Spec.Syncer.ExtraArgs...)...),
+							}, append(syncArgs, cluster.Spec.Syncer.ExtraArgs...)...),
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "data",

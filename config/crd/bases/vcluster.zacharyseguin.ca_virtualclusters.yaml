@@ -115,6 +115,25 @@ spec:
                 required:
                 - strategy
                 type: object
+              podScheduling:
+                description: Define how pods are scheduled within the virtual cluster
+                properties:
+                  enablePriorityClasses:
+                    description: Enable the use of priority classes for pod scheduling
+                    type: boolean
+                type: object
+              storage:
+                description: Define storage configuration for the virtual cluster.
+                properties:
+                  enableStorageClasses:
+                    description: Synchronize storage classes from the host cluster
+                    type: boolean
+                  syncPersistentVolumes:
+                    description: Synchronize persistent volumes from the host cluster
+                      to the virtual cluster rather than creating fake persistent
+                      volumes
+                    type: boolean
+                type: object
               syncer:
                 default:
                   image:

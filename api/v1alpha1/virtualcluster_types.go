@@ -44,6 +44,14 @@ type VirtualClusterSpec struct {
 	// +kubebuilder:default={strategy:"Fake"}
 	NodeSync VirtualClusterNodeSyncSpec `json:"nodeSync,omitempty"`
 
+	// Define how pods are scheduled within the virtual cluster
+	// +optional
+	PodScheduling VirtualClusterPodSchedulingSpec `json:"podScheduling,omitempty"`
+
+	// Define storage configuration for the virtual cluster.
+	// +optional
+	Storage VirtualClusterStorageSpec `json:"storage,omitempty"`
+
 	// Specify the ingress template for the cluster
 	// +optional
 	Ingress *VirtualClusterIngressSpec `json:"ingress,omitempty"`
@@ -85,6 +93,24 @@ type VirtualClusterComponentSpec struct {
 	// Extra arguments provided to the virtual cluster
 	// +optional
 	ExtraArgs []string `json:"extraArgs,omitempty"`
+}
+
+// VirtualClusterPodSchedulingSpec defines how pods are scheduled in the Virtual Cluster
+type VirtualClusterPodSchedulingSpec struct {
+	// Enable the use of priority classes for pod scheduling
+	// +optional
+	EnablePriorityClasses bool `json:"enablePriorityClasses"`
+}
+
+type VirtualClusterStorageSpec struct {
+	// Synchronize storage classes from the host cluster
+	// +optional
+	EnableStorageClasses bool `json:"enableStorageClasses"`
+
+	// Synchronize persistent volumes from the host cluster to the virtual cluster
+	// rather than creating fake persistent volumes
+	// +optional
+	SyncPersistentVolumes bool `json:"syncPersistentVolumes"`
 }
 
 // VirtualClusterIngressSpec defines the ingress specification for the virtual cluster
