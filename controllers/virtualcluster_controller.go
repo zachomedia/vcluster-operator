@@ -542,6 +542,24 @@ func toInt64Ptr(val int64) *int64 {
 	return &val
 }
 
+// annotationsForVirtualCluster returns the object annotations the given virtual cluster.
+//
+// All labels applied to a cluster are copied to the resources created by the controller.
+func annotationsForVirtualCluster(cluster *vclusterv1alpha1.VirtualCluster) map[string]string {
+	// Copy any labels from the cluster object istself
+	annotations := cluster.DeepCopy().Annotations
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+
+	// Remove annotations we don't want to sync
+	for _, annotation := range []string{"kubectl.kubernetes.io/last-applied-configuration"} {
+		delete(annotations, annotation)
+	}
+
+	return annotations
+}
+
 // labelsForVirtualCluster returns the object labels the given virtual cluster.
 //
 // All labels applied to a cluster are copied to the resources created by the controller.
@@ -595,7 +613,7 @@ func (r *VirtualClusterReconciler) serviceAccountForVirtualCluster(cluster *vclu
 			Name:        objectName(cluster),
 			Namespace:   cluster.Namespace,
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 	}
 
@@ -610,7 +628,7 @@ func (r *VirtualClusterReconciler) roleForVirtualCluster(cluster *vclusterv1alph
 			Name:        objectName(cluster),
 			Namespace:   cluster.Namespace,
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -646,7 +664,7 @@ func (r *VirtualClusterReconciler) clusterRoleForVirtualCluster(cluster *vcluste
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster)),
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		Rules: []rbacv1.PolicyRule{},
 	}
@@ -715,7 +733,7 @@ func (r *VirtualClusterReconciler) roleBindingForVirtualCluster(cluster *vcluste
 			Name:        objectName(cluster),
 			Namespace:   cluster.Namespace,
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacv1.SchemeGroupVersion.Group,
@@ -740,7 +758,7 @@ func (r *VirtualClusterReconciler) clusterRoleBindingForVirtualCluster(cluster *
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        fmt.Sprintf("vcluster:%s:%s", cluster.Namespace, objectName(cluster)),
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacv1.SchemeGroupVersion.Group,
@@ -766,7 +784,7 @@ func (r *VirtualClusterReconciler) serviceForVirtualCluster(cluster *vclusterv1a
 			Name:        objectName(cluster),
 			Namespace:   cluster.Namespace,
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		Spec: v1.ServiceSpec{
 			Type: v1.ServiceTypeClusterIP,
@@ -794,7 +812,7 @@ func (r *VirtualClusterReconciler) headlessServiceForVirtualCluster(cluster *vcl
 			Name:        fmt.Sprintf("%s-headless", objectName(cluster)),
 			Namespace:   cluster.Namespace,
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		Spec: v1.ServiceSpec{
 			Type:      v1.ServiceTypeClusterIP,
@@ -825,7 +843,7 @@ func (r *VirtualClusterReconciler) ingressForCluster(cluster *vclusterv1alpha1.V
 			Name:        objectName(cluster),
 			Namespace:   cluster.Namespace,
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: cluster.Spec.Ingress.IngressClassName,
@@ -906,7 +924,7 @@ func (r *VirtualClusterReconciler) statefulSetForVirtualCluster(cluster *vcluste
 			Name:        objectName(cluster),
 			Namespace:   cluster.Namespace,
 			Labels:      labelsForVirtualCluster(cluster),
-			Annotations: cluster.Annotations,
+			Annotations: annotationsForVirtualCluster(cluster),
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas:    toInt32Ptr(1),
